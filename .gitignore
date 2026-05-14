@@ -1,0 +1,15 @@
+data/
+results/
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+.venv/
+venv/
+*.pth
+*.pt
+.vscode/
+.idea/
+.DS_Store
+.env
+CLAUDE.md
+docs/
