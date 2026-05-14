@@ -106,6 +106,59 @@ class EffV2SBinary(nn.Module):
         return self.head(pooled).squeeze(-1)
 
 
+class ChannelAttention(nn.Module):
+    def __init__(self, channels: int, reduction: int = 16):
+        super().__init__()
+        hidden = max(1, channels // reduction)
+        self.mlp = nn.Sequential(
+            nn.Linear(channels, hidden, bias=False),
+            nn.ReLU(inplace=True),
+            nn.Linear(hidden, channels, bias=False),
+        )
+
+    def forward(self, x):
+        avg = self.mlp(x.mean(dim=(2, 3)))
+        mx = self.mlp(x.amax(dim=(2, 3)))
+        weight = torch.sigmoid(avg + mx)
+        return x * weight.unsqueeze(-1).unsqueeze(-1)
+
+
+class SpatialAttention(nn.Module):
+    def __init__(self, kernel_size: int = 7):
+        super().__init__()
+        self.conv = nn.Conv2d(2, 1, kernel_size, padding=kernel_size // 2, bias=False)
+
+    def forward(self, x):
+        avg = x.mean(dim=1, keepdim=True)
+        mx = x.amax(dim=1, keepdim=True)
+        weight = torch.sigmoid(self.conv(torch.cat([avg, mx], dim=1)))
+        return x * weight
+
+
+class CBAM(nn.Module):
+    def __init__(self, channels: int, reduction: int = 16, kernel_size: int = 7):
+        super().__init__()
+        self.channel = ChannelAttention(channels, reduction)
+        self.spatial = SpatialAttention(kernel_size)
+
+    def forward(self, x):
+        return self.spatial(self.channel(x))
+
+
+class EffV2SCBAM(nn.Module):
+    def __init__(self, backbone, reduction: int = 16, kernel_size: int = 7):
+        super().__init__()
+        self.backbone = backbone
+        self.cbam = CBAM(backbone.num_features, reduction, kernel_size)
+        self.pool = nn.AdaptiveAvgPool2d(1)
+        self.head = nn.Linear(backbone.num_features, 1)
+
+    def forward(self, x):
+        feats = self.cbam(self.backbone(x))
+        pooled = self.pool(feats).flatten(1)
+        return self.head(pooled).squeeze(-1)
+
+
 def _cosine_with_warmup(optimizer, total_steps: int, warmup_steps: int):
     warmup_steps = max(1, warmup_steps)
     warmup = torch.optim.lr_scheduler.LinearLR(
@@ -140,14 +193,28 @@ class Tier2(Tier):
     model_filename = "model.pt"
 
     def __init__(self):
-        self.model: EffV2SBinary | None = None
+        self.model: nn.Module | None = None
         self.best_epoch: int | None = None
         self.best_val_auroc: float | None = None
         self.hyperparams: dict = {}
         self._img_size: int = 384
+        self._model_kwargs_used: dict = {}
 
     def _eval_batch_size(self) -> int:
         return 32 if self._img_size >= 384 else 64
+
+    def _build_model(self, backbone, **kwargs) -> nn.Module:
+        return EffV2SBinary(backbone)
+
+    def _model_kwargs(self, cfg) -> dict:
+        return {}
+
+    def _param_groups(self, model, cfg) -> list[dict]:
+        return [
+            {"params": model.backbone.parameters(), "lr": float(cfg.optim.lr_backbone)},
+            {"params": list(model.pool.parameters()) + list(model.head.parameters()),
+             "lr": float(cfg.optim.lr_head)},
+        ]
 
     def select_hyperparams(self, train_df, val_df, cfg, seed) -> dict:
         return {}
@@ -171,7 +238,8 @@ class Tier2(Tier):
         backbone = timm.create_model(
             cfg.model.backbone, pretrained=True, num_classes=0, global_pool="",
         )
-        model = EffV2SBinary(backbone).to(device)
+        self._model_kwargs_used = self._model_kwargs(cfg)
+        model = self._build_model(backbone, **self._model_kwargs_used).to(device)
 
         cj = cfg.augment.color_jitter
         train_tx = train_transform(
@@ -200,11 +268,7 @@ class Tier2(Tier):
         )
 
         optimizer = torch.optim.AdamW(
-            [
-                {"params": model.backbone.parameters(), "lr": float(cfg.optim.lr_backbone)},
-                {"params": list(model.pool.parameters()) + list(model.head.parameters()),
-                 "lr": float(cfg.optim.lr_head)},
-            ],
+            self._param_groups(model, cfg),
             weight_decay=float(cfg.optim.weight_decay),
         )
         steps_per_epoch = max(1, len(train_loader))
@@ -294,6 +358,7 @@ class Tier2(Tier):
             "state_dict": self.model.state_dict(),
             "hyperparams": self.hyperparams,
             "img_size": self._img_size,
+            "model_kwargs": self._model_kwargs_used,
         }, path)
 
     def load(self, path) -> None:
@@ -303,7 +368,8 @@ class Tier2(Tier):
             "tf_efficientnetv2_s.in21k_ft_in1k", pretrained=False,
             num_classes=0, global_pool="",
         )
-        self.model = EffV2SBinary(backbone).cuda()
+        self._model_kwargs_used = obj.get("model_kwargs", {})
+        self.model = self._build_model(backbone, **self._model_kwargs_used).cuda()
         self.model.load_state_dict(obj["state_dict"])
         self.hyperparams = obj.get("hyperparams", {})
         self.best_epoch = self.hyperparams.get("best_epoch")
@@ -311,27 +377,23 @@ class Tier2(Tier):
         self._img_size = int(obj.get("img_size", 384))
 
 
-class _NotYet(Tier):
-    name = "tier"
+class Tier3(Tier2):
+    def _build_model(self, backbone, **kwargs) -> nn.Module:
+        return EffV2SCBAM(backbone, **kwargs)
 
-    def select_hyperparams(self, train_df, val_df, cfg, seed) -> dict:
-        return {}
+    def _model_kwargs(self, cfg) -> dict:
+        return {
+            "reduction": int(cfg.cbam.reduction),
+            "kernel_size": int(cfg.cbam.kernel_size),
+        }
 
-    def fit(self, *a, **k):
-        raise NotImplementedError(f"{self.name} not implemented yet")
-
-    def score(self, df):
-        raise NotImplementedError(f"{self.name} not implemented yet")
-
-    def save(self, path):
-        raise NotImplementedError(f"{self.name} not implemented yet")
-
-    def load(self, path):
-        raise NotImplementedError(f"{self.name} not implemented yet")
-
-
-class Tier3(_NotYet):
-    name = "Tier3 (EfficientNetV2-S + CBAM)"
+    def _param_groups(self, model, cfg) -> list[dict]:
+        return [
+            {"params": model.backbone.parameters(), "lr": float(cfg.optim.lr_backbone)},
+            {"params": (list(model.cbam.parameters()) + list(model.pool.parameters())
+                        + list(model.head.parameters())),
+             "lr": float(cfg.optim.lr_head)},
+        ]
 
 
 def build(tier_id: int, cfg, seed: int) -> Tier:
