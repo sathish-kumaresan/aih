@@ -9,7 +9,6 @@ from src.data import (
     honest_split,
     list_images,
     provided_split,
-    published_counts_400x,
 )
 from src.metrics import image_metrics, patient_metrics, summarize
 from src.models import build
@@ -165,8 +164,7 @@ def main():
         _gpu_preamble(cfg)
 
     df, unparsed = list_images(cfg.data.root)
-    published = published_counts_400x()
-    print(f"on-disk images: {len(df)} (published {published['total']}, gap {published['total'] - len(df)})")
+    print(f"on-disk images: {len(df)}")
     print(f"on-disk patients: {df.patient_id.nunique()}")
     if unparsed:
         print(f"unparsed filenames: {len(unparsed)}")

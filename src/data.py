@@ -9,10 +9,6 @@ _NAME_RE = re.compile(
 )
 
 
-def published_counts_400x() -> dict:
-    return {"benign": 588, "malignant": 1232, "total": 1820}
-
-
 def list_images(root) -> tuple[pd.DataFrame, list[str]]:
     root = Path(root)
     rows, unparsed = [], []
