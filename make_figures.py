@@ -1,9 +1,3 @@
-"""Publication figures for the BreaKHis 3-model benchmark.
-
-Six figures (+ master-table .tex), all 13" double-column at 300 DPI, saved to
-results/figures/. Reads existing artefacts only — no model loading, no GPU.
-"""
-
 from __future__ import annotations
 
 import re
@@ -50,7 +44,7 @@ TABLE_METRICS = [
     ("sensitivity", "Sens."),
     ("specificity", "Spec."),
     ("f1", "F1"),
-    ("accuracy", "Acc."),  # computed from confusion txt, not in summary CSV
+    ("accuracy", "Acc."),
 ]
 
 plt.style.use("seaborn-v0_8-whitegrid")
@@ -62,7 +56,6 @@ plt.rcParams.update({
 })
 
 
-# Helpers ----------------------------------------------------------------------
 def save_fig(fig, name):
     out = FIGS / f"{name}.png"
     fig.savefig(out)
@@ -100,7 +93,6 @@ def parse_confusion_txt(path):
 
 
 def metric_meanstd(model, split, metric, level):
-    """(mean, std) from the summary CSV, or (None, None) if absent."""
     df = load_summary(model, split)
     sub = df[(df["metric"] == metric) & (df["level"] == level)]
     if sub.empty:
@@ -118,9 +110,7 @@ def fmt(mean, std):
     return f"{mean:.3f} ± {std:.3f}"
 
 
-# Figure 1 — master table (TEX + PNG, both consume one iterator) ---------------
 def table_cells():
-    """Yield (split, level, model, [formatted cell strings]) for every body row."""
     for split in SPLITS:
         for level in LEVELS:
             for m in MODELS:
@@ -192,7 +182,6 @@ def render_table_png():
     return fig
 
 
-# Figure 2 — leakage gap -------------------------------------------------------
 def fig_leakage_gap():
     fig, axes = plt.subplots(1, 2, figsize=(W, 4.5), sharey=True)
     width = 0.36
@@ -220,7 +209,6 @@ def fig_leakage_gap():
     return fig
 
 
-# Figure 3 — patient-level confusion matrices (5-seed mean, totals = real N) ---
 def fig_confusion_patient():
     fig, axes = plt.subplots(3, 2, figsize=(W, 13))
     for r, m in enumerate(MODELS):
@@ -252,7 +240,6 @@ def fig_confusion_patient():
     return fig
 
 
-# Figure 4 — probability distributions per true class --------------------------
 def fig_proba_histograms(preds):
     fig, axes = plt.subplots(2, 3, figsize=(W, 7.5), sharey="row")
     classes = [(0, "tab:blue", "Benign (true)"), (1, "tab:red", "Malignant (true)")]
@@ -288,7 +275,6 @@ def fig_proba_histograms(preds):
     return fig
 
 
-# Figure 5 — per-subtype error rate (honest) -----------------------------------
 def fig_subtype_error_rate(preds, subtype_map):
     n = {s: 0 for s in SUBTYPE_ORDER}
     err = {m: {s: 0 for s in SUBTYPE_ORDER} for m in MODELS}
@@ -333,11 +319,9 @@ def fig_subtype_error_rate(preds, subtype_map):
     return fig
 
 
-# Figure 6 — qualitative grid (EfficientNetV2-S, honest seed 1) ----------------
 def fig_qualitative(preds, subtype_map):
     df = preds[(2, "honest", 1)].copy()
     df["subtype"] = df["path"].map(subtype_map)
-    # (label, pred, sort_largest, row_text, frame_color)
     rows_spec = [
         (1, 1, True,  "TP (M → M)", "#2e8b57"),
         (0, 0, False, "TN (B → B)", "#2e8b57"),
@@ -381,7 +365,6 @@ def fig_qualitative(preds, subtype_map):
     return fig
 
 
-# Main -------------------------------------------------------------------------
 def main():
     preds = load_all_predictions()
     smap = load_subtype_map()

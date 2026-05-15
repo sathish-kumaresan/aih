@@ -6,7 +6,7 @@ import pandas as pd
 from PIL import Image
 from tqdm import tqdm
 
-PFTAS_DIM = 162  # 54 features per channel * 3 RGB channels
+PFTAS_DIM = 162
 _FEATURE_COLS = [f"pftas_{i:03d}" for i in range(PFTAS_DIM)]
 
 

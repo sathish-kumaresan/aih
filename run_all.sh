@@ -1,9 +1,4 @@
 #!/usr/bin/env bash
-# Run the model tiers end to end, logging each to results/logs/.
-# Intended for an unattended tmux session:
-#   tmux new -s aih
-#   ./run_all.sh         # runs tiers 1 2 3
-#   ./run_all.sh 2 3     # runs only the given tiers
 set -u
 cd "$(dirname "$0")"
 
